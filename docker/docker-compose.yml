@@ -1,0 +1,39 @@
+version: "3.9"
+services:
+  api:
+    build: .
+    container_name: pictunes-api
+    restart: always
+    env_file: .env
+    volumes:
+      - ./app/static:/app/app/static
+      - ./weights:/app/weights
+    expose:
+      - "8000"
+
+  mysql:
+    image: mysql:8.0
+    container_name: pictunes-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: pictunes
+      MYSQL_USER: pictunes_user
+      MYSQL_PASSWORD: pictunes_pass
+    volumes:
+      - dbdata:/var/lib/mysql
+    ports:
+      - "3306:3306"
+
+  nginx:
+    image: nginx:1.25
+    container_name: pictunes-nginx
+    depends_on:
+      - api
+    volumes:
+      - ./nginx/pictunes.me.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
+
+volumes:
+  dbdata:

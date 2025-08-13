@@ -1,0 +1,14 @@
+# /etc/systemd/system/pictunes.service
+[Unit]
+Description=Pictunes FastAPI
+After=network.target
+
+[Service]
+User=www-data
+WorkingDirectory=/home/ubuntu/pictunes-backend
+Environment="PATH=/home/ubuntu/pictunes-backend/.venv/bin"
+ExecStart=/home/ubuntu/pictunes-backend/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

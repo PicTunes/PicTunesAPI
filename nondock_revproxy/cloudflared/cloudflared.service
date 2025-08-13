@@ -1,0 +1,12 @@
+# /etc/systemd/system/cloudflared.service
+[Unit]
+Description=cloudflared
+After=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/cloudflared tunnel run
+Restart=on-failure
+User=cloudflared
+
+[Install]
+WantedBy=multi-user.target
