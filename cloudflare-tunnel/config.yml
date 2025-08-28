@@ -1,0 +1,12 @@
+tunnel: PictunesTunnel
+credentials-file: /etc/cloudflared/<TUNNEL_UUID>.json
+ingress:
+  - hostname: pictunes.me
+    service: http://127.0.0.1:8000
+    originRequest:
+      httpHostHeader: pictunes.me
+      connectTimeout: 30s
+      noTLSVerify: true
+  - hostname: mysql.pictunes.me
+    service: tcp://127.0.0.1:3306
+  - service: http_status:404

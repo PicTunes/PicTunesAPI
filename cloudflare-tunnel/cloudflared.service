@@ -1,0 +1,11 @@
+[Unit]
+Description=cloudflared Tunnel
+After=network-online.target
+[Service]
+Type=simple
+User=cloudflared
+ExecStart=/usr/local/bin/cloudflared tunnel --config /etc/cloudflared/config.yml run
+Restart=on-failure
+RestartSec=5s
+[Install]
+WantedBy=multi-user.target

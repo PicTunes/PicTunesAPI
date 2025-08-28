@@ -1,0 +1,11 @@
+[Unit]
+Description=cloudflared MySQL Access TCP Client
+After=network-online.target
+[Service]
+Type=simple
+User=cloudflared
+ExecStart=/usr/local/bin/cloudflared access tcp --hostname mysql.pictunes.me --listener 127.0.0.1:3306
+Restart=on-failure
+RestartSec=5s
+[Install]
+WantedBy=multi-user.target
