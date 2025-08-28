@@ -5,7 +5,9 @@ python-multipart==0.0.9
 Pillow==10.3.0
 requests==2.32.3
 sqlalchemy==2.0.30
+asyncmy==0.2.9
 pymysql==1.1.0
+alembic==1.13.1
 torch>=2.0.0
 torchvision>=0.15.0
 numpy>=1.24.0

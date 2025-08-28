@@ -1,4 +1,3 @@
-# app/schemas.py
 from pydantic import BaseModel, AnyHttpUrl, Field
 from typing import List, Optional
 

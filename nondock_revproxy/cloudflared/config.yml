@@ -1,7 +1,0 @@
-# /etc/cloudflared/config.yml
-tunnel: PictunesTunnel
-credentials-file: /etc/cloudflared/<UUID>.json
-ingress:
-  - hostname: pictunes.me
-    service: http://127.0.0.1:8000
-  - service: http_status:404

@@ -1,32 +1,37 @@
-version: '3.8'
-
+version: "3.9"
 services:
-  backend:
+  api:
     build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - DB_HOST=mysql_db
-      - DB_PORT=3306
-      - DB_USER=backend_user
-      - DB_PASSWORD=secure_password
-      - DB_NAME=backend_db
-    depends_on:
-      - mysql_db
+    container_name: pictunes-api
+    restart: always
+    env_file: .env
     volumes:
-      - ./app:/app/app
-  
-  mysql_db:
+      - ./app/static:/app/app/static
+      - ./weights:/app/weights
+      - ./data/embeddings:/app/data/embeddings
+    expose:
+      - "8000"
+  mysql:
     image: mysql:8.0
+    container_name: pictunes-mysql
+    restart: always
     environment:
-      - MYSQL_ROOT_PASSWORD=root_password
-      - MYSQL_DATABASE=backend_db
-      - MYSQL_USER=backend_user
-      - MYSQL_PASSWORD=secure_password
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: pictunes
+      MYSQL_USER: pictunes_user
+      MYSQL_PASSWORD: pictunes_pass
+    volumes:
+      - dbdata:/var/lib/mysql
     ports:
       - "3306:3306"
+  nginx:
+    image: nginx:1.25
+    container_name: pictunes-nginx
+    depends_on:
+      - api
     volumes:
-      - mysql_data:/var/lib/mysql
-
+      - ./nginx/pictunes.me.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "80:80"
 volumes:
-  mysql_data:
+  dbdata:

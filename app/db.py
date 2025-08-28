@@ -1,23 +1,38 @@
-# app/db.py
-from sqlalchemy.orm import declarative_base, sessionmaker
-from sqlalchemy import create_engine, Column, Integer, String, Text
-from app.config import settings
+from typing import AsyncGenerator, Optional
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.orm import DeclarativeBase
+from sqlalchemy import text
+from app.config import get_settings
 
-Base = declarative_base()
-SessionLocal = None
+settings = get_settings()
+
+class Base(DeclarativeBase):
+    pass
+
 engine = None
+SessionLocal: Optional[async_sessionmaker[AsyncSession]] = None
 
-if settings.DB_URL:
-    engine = create_engine(settings.DB_URL, pool_pre_ping=True, future=True)
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+if settings.DATABASE_URL_ASYNC:
+    engine = create_async_engine(
+        settings.DATABASE_URL_ASYNC,
+        echo=False,
+        pool_pre_ping=True,
+        pool_recycle=1800,
+        pool_size=5,
+        max_overflow=10,
+        future=True,
+    )
+    SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
-class ImageAsset(Base):
-    __tablename__ = "image_assets"
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    url = Column(String(512), nullable=False)         # public URL to the image
-    label = Column(String(128), nullable=True)
-    embedding_path = Column(String(512), nullable=True)  # .npy path for vector
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    if SessionLocal is None:
+        raise RuntimeError("DATABASE_URL_ASYNC is not configured.")
+    async with SessionLocal() as session:
+        yield session
 
-def init_db():
-    if engine is not None:
-        Base.metadata.create_all(bind=engine)
+async def check_db() -> bool:
+    if engine is None:
+        return False
+    async with engine.begin() as conn:
+        await conn.execute(text("SELECT 1"))
+    return True
