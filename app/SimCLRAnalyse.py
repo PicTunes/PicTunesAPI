@@ -13,51 +13,36 @@ from torchvision import transforms
 # PyTorch Lightning
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
-from pytorch_lighting import loggers as pl_loggers
+from pytorch_lightning import loggers as pl_loggers
 
 # Others
 import os
 import re
+import warnings
 from copy import deepcopy
 import PIL
 import numpy as np
 import urllib.request
 from urllib.error import HTTPError
 
+# Suppress warnings for cleaner output
+warnings.filterwarnings("ignore", category=UserWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+
 # Path Configurations
-DATASET_PATH = "../dataset/"
-CHECKPOINT_PATH = "../saved_models/"
+DATASET_PATH = "dataset"
+CHECKPOINT_PATH = "saved_models"
 NUM_WORKERS = os.cpu_count()
+
+# Device configuration
+device = torch.device("cuda" 
+                     if torch.cuda.is_available() else "mps" 
+                     if torch.mps.is_available() else "cpu")
 
 # Seed Settings
 pl.seed_everything(42)
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
-
-device = torch.device("cuda" 
-                      if torch.cuda.is_available() else "mps" 
-                      if torch.mps.is_available() else "cpu")
-
-print("Device:", device)
-print("Num Workers:", NUM_WORKERS)
-
-pretrained_url = "https://raw.githubusercontent.com/phlippe/saved_models/main/tutorial17/"
-pretrained_files = ["SimCLR.ckpt", "ResNet.ckpt",
-                    "tensorboards/SimCLR/events.out.tfevents.SimCLR",
-                    "tensorboards/classification/ResNet/events.out.tfevents.ResNet"]
-pretrained_files += [f"LogisticRegression_{size}.ckpt" for size in [10, 20, 50, 100, 200, 500]]
-os.makedirs(CHECKPOINT_PATH, exist_ok=True)
-for file_name in pretrained_files:
-    file_path = os.path.join(CHECKPOINT_PATH, file_name)
-    if "/" in file_name:
-        os.makedirs(file_path.rsplit("/", 1)[0], exist_ok=True)
-    if not os.path.isfile(file_path):
-        file_url = pretrained_url + file_name
-        print(f"Downloading {file_name}...")
-        try:
-            urllib.request.urlretrieve(file_url, file_path)
-        except HTTPError as e:
-            print(f"Failed to download {file_name}: {e}")
 
 class ContrastiveTransformations(object):
     def __init__(self, base_transforms, n_views=2):
@@ -66,7 +51,6 @@ class ContrastiveTransformations(object):
 
     def __call__(self, x):
         return [self.base_transforms(x) for i in range(self.n_views)]
-    
 
 
 contrast_transforms = transforms.Compose([
@@ -125,374 +109,120 @@ train_loader, val_loader, class_names = create_data_loaders(
     DATASET_PATH, batch_size=256, num_workers=NUM_WORKERS
 )
 
-class SimCLR(pl.LightningModule):
-    def __init__(self, hidden_dim, lr, temperature, weight_decay, max_epochs):
-        super().__init__()
-        self.save_hyperparameters()
-        assert self.hparams.temperature > 0.0, "The temperature must be a positive float!"
-
-        # Base model f(.) - ResNet50
-        self.convnet = torchvision.models.resnet50(weights=None)
-
-        # MLP g(.) Linear->ReLU->Linear
-        self.convnet.fc = nn.Sequential(
-            nn.Linear(self.convnet.fc.in_features, 4*hidden_dim),
-            nn.ReLU(),
-            nn.Linear(4*hidden_dim, hidden_dim)
-        )
-
-    def configure_optimizers(self):
-        optimizer = optim.AdamW(self.parameters(),
-                                lr=self.hparams.lr,
-                                weight_decay=self.hparams.weight_decay)
-        lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer,
-                                                            T_max=self.hparams.max_epochs,
-                                                            eta_min=self.hparams.lr/50)
-        return [optimizer], [lr_scheduler]
-    
-    def info_nce_loss(self, batch, mode='train'):
-        imgs, _ = batch
-        imgs = torch.cat(imgs, dim=0)
-        
-        # Encode images
-        feats = self.convnet(imgs)
-
-        # Calculate cosine similarity
-        cos_sim = F.cosine_similarity(feats[:,None,:], feats[None,:,:], dim=-1)
-
-        # Mask out cosine similarity to itself
-        self_mask = torch.eye(cos_sim.shape[0], dtype=torch.bool, device=cos_sim.device)
-        cos_sim.masked_fill_(self_mask, -9e15)
-
-        # Find positive example -> batch_size//2 away from the original example
-        pos_mask = self_mask.roll(shifts=cos_sim.shape[0]//2, dims=0)
-
-        # InfoNCE loss
-        cos_sim = cos_sim / self.hparams.temperature
-        nll = -cos_sim[pos_mask] + torch.logsumexp(cos_sim, dim=-1)
-        nll = nll.mean()
-
-        # Logging loss
-        self.log(mode+"_loss", nll)
-
-        # Get ranking position of positive example
-        comb_sim = torch.cat([cos_sim[pos_mask][:,None], 
-                                cos_sim.masked_fill(pos_mask, -9e15)], dim=-1)
-        sim_argsort = comb_sim.argsort(dim=-1, descending=True).argmin(dim=-1)
-
-        # Logging ranking metrics
-        self.log(mode+"_acc_top1", (sim_argsort==0).float().mean())
-        self.log(mode+"_acc_top5", (sim_argsort<5).float().mean())
-        self.log(mode+"_acc_mean_pos", 1+sim_argsort.float().mean())
-
-        return nll
-    
-    def training_step(self, batch, batch_idx):
-        return self.info_nce_loss(batch, mode='train')
-    
-    def validation_step(self, batch, batch_idx):
-        return self.info_nce_loss(batch, mode='val')
-        
-def train_simclr(batch_size, max_epochs=500, **kwargs):
-    """
-    This function has to run roughly 50min
-    TODO: Look for alternatives to store model for accomplishing the classfication task
-    """
-    # create data loaders
-    train_loader, val_loader = create_data_loaders(
-        DATASET_PATH, batch_size=batch_size, num_workers=0
-    )
-
-    # Setup TensorBoard logging
-    tb_logger = pl_loggers.TensorBoardLogger(
-        save_dir=os.path.join(CHECKPOINT_PATH, 'tensorboards'),
-        name='SimCLR.ckpt'
-    )
-
-    # Configure trainer 
-    trainer = pl.Trainer(
-        default_root_dir=os.path.join(CHECKPOINT_PATH, 'SimCLR.ckpt'),
-        accelerator="gpu" if torch.cuda.is_available() else "mps" 
-                        if torch.mps.is_available() else "cpu",
-        devices=1,
-        max_epochs=max_epochs,
-        callbacks=[
-            ModelCheckpoint(save_weights_only=True, mode='max', monitor='val_acc_top5'),
-            LearningRateMonitor('epoch')
-        ],
-        logger=tb_logger
-    )
-
-    # Initialize and train model
-    pl.seed_everything(42)
-    model = SimCLR(max_epochs=max_epochs, **kwargs)
-    trainer.fit(model, train_loader, val_loader)
-
-    # Load best checkpoint
-    model = SimCLR.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
-    return model, trainer
-
-simclr_model, simclr_trainer = train_simclr(
-    batch_size=256,
-    hidden_dim=128,
-    lr=3e-4,
-    temperature=0.07,
-    weight_decay=1e-4,
-    max_epochs=100
-) # took around 50 mins to train
-
-simclr_model.to(device)
-simclr_model.eval()
-print("SimCLR model trained and loaded.")
-# Example usage
-# for batch in train_loader:
-#     imgs, _ = batch
-#     imgs = torch.cat(imgs, dim=0).to(device)
-#     with torch.no_grad():
-#         feats = simclr_model.convnet(imgs)
-#     print("Feature shape:", feats.shape)
-#     break
-
-simclr_trainer.save_checkpoint(os.path.join(CHECKPOINT_PATH, "SimCLR.ckpt"))
-print("SimCLR model checkpoint saved.")
-
-class LogisticRegression(pl.LightningModule):
-    def __init__(self, feature_dim, num_classes, lr, weight_decay, max_epochs):
-        """
-        Logistic regression implementation
-        """
-        super().__init__()
-        self.save_hyperparameters()
-        # Mapping from representation h to classes
-        self.model = nn.Linear(feature_dim, num_classes)
-
-    def configure_optimizers(self):
-        optimizer = optim.AdamW(self.parameters(),
-                                lr=self.hparams.lr,
-                                weight_decay=self.hparams.weight_decay)
-        lr_scheduler = optim.lr_scheduler.MultiStepLR(optimizer,
-                                                      milestones=[int(self.hparams.max_epochs*0.6),
-                                                                  int(self.hparams.max_epochs*0.8)],
-                                                      gamma=0.1)
-        return [optimizer], [lr_scheduler]
-    
-    def _calculate_loss(self, batch, mode='train'):
-        feats, labels = batch
-        preds = self.model(feats)
-        loss = F.cross_entropy(preds, labels)
-        acc = (preds.argmax(dim=-1) == labels).float().mean()
-        self.log(mode + "_loss", loss)
-        self.log(mode + "_acc", acc)
-        return loss
-    
-    def training_step(self, batch, batch_idx):
-        return self._calculate_loss(batch, mode='train')
-    
-    def validation_step(self, batch, batch_idx):
-        return self._calculate_loss(batch, mode='val')
-
-    def test_step(self, batch, batch_idx):
-        return self._calculate_loss(batch, mode='test')
-    
-    
-@torch.no_grad()
-def prepare_data_features(model, dataset): # second arg not used
-    """
-    Prepare features for evaluation
-    """
-    # Prepare model - remove projection head g(.)
-    network = deepcopy(model.convnet)
-    network.fc = nn.Identity()
-    network.eval()
-    network.to(device)
-
-    # Create evaluation transforms (no augmentations)
-    img_transforms = transforms.Compose([
-        transforms.Resize(256, 256),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
-
-    # Create dataset with evaluation transforms
-    eval_dataset = ImageFolder(root=DATASET_PATH, transforms=img_transforms)
-
-    # Encode all images
-    data_loader = data.DataLoader(eval_dataset, batch_size=64,
-                                    num_workers=NUM_WORKERS, shuffle=False, drop_last=False)
-    feats, labels = [], []
-    for batch_imgs, batch_labels in data_loader:
-        batch_imgs = batch_imgs.to(device)
-        batch_feats = network(batch_imgs)
-        feats.append(batch_feats.detach().cpu())
-        labels.append(batch_labels)
-
-    feats = torch.cat(feats, dim=0)
-    labels = torch.cat(labels, dim=0)
-
-    # Sort images by labels
-    labels, idxs = labels.sort()
-    feats = feats[idxs]
-
-    return data.TensorDataset(feats, labels)
-
-train_feats_simclr = prepare_data_features(simclr_model, DATASET_PATH) # Run Time: ~1min
-print(f"Features extracted: {train_feats_simclr.tensors[0].shape}")
-
-def train_logreg(batch_size, train_feats_data, test_feats_data, model_suffix, max_epochs=100, **kwargs):
-    """
-    Train Logistic Regression
-    """
-    trainer = pl.Trainer(
-        default_root_dir=os.path.join(CHECKPOINT_PATH, "LogisticRegression"),
-        accelerator="gpu" if torch.cuda.is_available() else "mps" 
-                    if torch.mps.is_available() else "cpu",
-        devices=1,
-        max_epochs=max_epochs,
-        callbacks=[
-            ModelCheckpoint(save_weights_only=True, mode='max', monitor='val_acc'),
-            LearningRateMonitor('epoch')
-        ],
-        enable_progress_bar=False,
-        check_val_every_n_epoch=10
-    )
-    trainer.logger._default_hp_metric = None
-
-    # Data Loaders
-    train_loader = data.DataLoader(train_feats_data, batch_size=batch_size, shuffle=True,
-                                    drop_last=True, pin_memory=True, num_workers=0)
-    test_loader = data.DataLoader(test_feats_data, batch_size=batch_size, shuffle=False,
-                                    drop_last=False, pin_memory=True, num_workers=0)
-    
-    # Check whether pretrained model exists
-    pretrained_filename = os.path.join(CHECKPOINT_PATH, f"LogisticRegression_{model_suffix}.ckpt")
-    if os.path.isfile(pretrained_filename):
-        print(f"Found pretrained model: {pretrained_filename}. Loading...")
-        model = LogisticRegression.load_from_checkpoint(pretrained_filename)
-    else:
-        pl.seed_everything(42)
-        model = LogisticRegression(**kwargs)
-        trainer.fit(model, train_loader, test_loader)
-        model = LogisticRegression.load_from_checkpoint(trainer.checkpoint_callback.best_model_path)
-
-    # Test best model
-    train_result = trainer.test(model, train_loader, verbose=False)
-    test_result = trainer.test(model, test_loader, verbose=False)
-    result = {"train": train_result[0], "test": test_result[0]["test_acc"]}
-
-    return model, result
-    
-logreg_model, logreg_result = train_logreg(
-    batch_size=64,
-    train_feats_data=train_feats_simclr,
-    test_feats_data=train_feats_simclr,
-    model_suffix="final",
-    feature_dim=train_feats_simclr.tensors[0].shape[1],
-    num_classes=len(class_names),
-    lr=1e-3,
-    weight_decay=1e-3
-)
-
-def evaluate_full_dataset_90_10():
-    dataset_size = len(train_feats_simclr)
-    train_size = int(0.9 * dataset_size)
-    test_size = dataset_size - train_size
-
-    train_feats, test_feats = data.random_split(
-        train_feats_simclr,
-        [train_size, test_size],
-        generator=torch.Generator().manual_seed(42)
-    )
-
-    model, result = train_logreg(
-        batch_size=64,
-        train_feats_data=train_feats,
-        test_feats_data=test_feats,
-        model_suffix="full_90_10",
-        feature_dim=train_feats_simclr.tensors[0].shape[1],
-        num_classes=len(class_names),
-        lr=1e-3,
-        weight_decay=1e-3,
-        max_epochs=150
-    )
-
-    return model, test_feats, result
-
-full_model, test_feats, _ = evaluate_full_dataset_90_10()
-
 def precompute_features(simclr_model, dataset_path, class_names):
-    feature_extractor = deepcopy(simclr_model.convnet)
-    feature_extractor.fc = nn.Identity()
-    feature_extractor.eval().to(device)
+    """
+    Precompute features for all images in the dataset.
+    
+    Args:
+        simclr_model: The SimCLR model for feature extraction
+        dataset_path: Path to the dataset directory
+        class_names: List of class names to process
+    
+    Returns:
+        Tuple of (features, paths, classes) or (None, [], []) if failed
+    """
+    try:
+        # Use the full SimCLR convnet (with projection layer) for feature extraction
+        feature_extractor = deepcopy(simclr_model.convnet)
+        feature_extractor.eval().to(device)
 
-    eval_transform = transforms.Compose([
-        transforms.Resize(256, 256),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5,), (0.5,))
-    ])
+        eval_transform = transforms.Compose([
+            transforms.Resize((256, 256)),
+            transforms.ToTensor(),
+            transforms.Normalize((0.5,), (0.5,))
+        ])
 
-    all_features = []
-    all_paths = []
-    all_classes = []
+        all_features = []
+        all_paths = []
+        all_classes = []
 
-    for class_idx, class_name in enumerate(class_names):
-        class_dir = os.path.join(dataset_path, class_name)
-        if not os.path.isdir(class_dir):
-            continue
+        print(f"Starting feature precomputation for {len(class_names)} classes...")
 
-        numeric_images = [img for img in os.listdir(class_dir) if re.match(r'^\d+', img)]
-        print(f"Class '{class_name}': {len(numeric_images)} numeric images found.")
+        for class_idx, class_name in enumerate(class_names):
+            class_dir = os.path.join(dataset_path, class_name)
+            if not os.path.isdir(class_dir):
+                print(f"Warning: Class directory '{class_dir}' not found, skipping...")
+                continue
 
-        batch_size = 64
-        for i in range(0, len(numeric_images),batch_size):
-            batch_images = numeric_images[i:i+batch_size]
-            batch_tensors = []
-            batch_paths = []
+            # Get all image files (not just numeric ones)
+            image_extensions = {'.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif'}
+            all_images = [img for img in os.listdir(class_dir) 
+                         if os.path.splitext(img.lower())[1] in image_extensions]
+            
+            # Prioritize numeric images but include all
+            numeric_images = [img for img in all_images if re.match(r'^\d+', img)]
+            non_numeric_images = [img for img in all_images if not re.match(r'^\d+', img)]
+            images_to_process = numeric_images + non_numeric_images
+            
+            print(f"Class '{class_name}': Processing {len(images_to_process)} images...")
 
-            for img_name in batch_images:
-                img_path = os.path.join(class_dir, img_name)
-                try:
-                    img = PIL.Image.open(img_path).convert('RGB')
-                    tensor = eval_transform(img).unsqueeze(0)
-                    batch_tensors.append(tensor)
-                    batch_paths.append(img_path)
-                except Exception as e:
-                    print(f"Error processing image {img_path}: {e}")
+            batch_size = 64
+            processed_count = 0
+            
+            for i in range(0, len(images_to_process), batch_size):
+                batch_images = images_to_process[i:i+batch_size]
+                batch_tensors = []
+                batch_paths = []
+
+                for img_name in batch_images:
+                    img_path = os.path.join(class_dir, img_name)
+                    try:
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            img = PIL.Image.open(img_path).convert('RGB')
+                            tensor = eval_transform(img).unsqueeze(0)
+                            batch_tensors.append(tensor)
+                            batch_paths.append(img_path)
+                            processed_count += 1
+                    except Exception as e:
+                        print(f"Warning: Error processing image {img_path}: {e}")
+                        continue
 
                 if batch_tensors:
-                    batch_tensors = torch.cat(batch_tensors).to(device)
-                    with torch.no_grad():
-                        batch_features = feature_extractor(batch_tensors).cpu()
+                    try:
+                        batch_tensors = torch.cat(batch_tensors).to(device)
+                        with torch.no_grad():
+                            batch_features = feature_extractor(batch_tensors).cpu()
 
-                    all_features.append(batch_features)
-                    all_paths.extend(batch_paths)
-                    all_classes.extend([class_name] * len(batch_paths))
+                        all_features.append(batch_features)
+                        all_paths.extend(batch_paths)
+                        all_classes.extend([class_name] * len(batch_paths))
+                    except Exception as e:
+                        print(f"Warning: Error processing batch for class {class_name}: {e}")
+                        continue
+                        
+            print(f"Class '{class_name}': Successfully processed {processed_count} images")
                 
-    if all_features:
-        all_features = torch.cat(all_features, dim=0)
-        print(f"Precomputed features {len(all_features)} images.")
-        return all_features, all_paths, all_classes
-    else:
-        print("No features were precomputed.")
+        if all_features:
+            all_features = torch.cat(all_features, dim=0)
+            print(f"Successfully precomputed features for {len(all_features)} images across {len(set(all_classes))} classes.")
+            return all_features, all_paths, all_classes
+        else:
+            print("Error: No features were precomputed.")
+            return None, [], []
+    
+    except Exception as e:
+        print(f"Error in precompute_features: {e}")
         return None, [], []
     
 def fast_visualize_prediction(image_path, simclr_model, logreg_model, precomputed_data, class_names):
-    precompute_features, precomputed_paths, precomputed_classes = precomputed_data
+    precomputed_features, precomputed_paths, precomputed_classes = precomputed_data
 
     img = PIL.Image.open(image_path).convert('RGB')
     eval_transform = transforms.Compose([
-        transforms.Resize(256, 256),
+        transforms.Resize((256, 256)),
         transforms.ToTensor(),
         transforms.Normalize((0.5,), (0.5,))
     ])
     input_tensor = eval_transform(img).unsqueeze(0).to(device)
 
+    # Use the full SimCLR convnet (with projection layer) for feature extraction
     feature_extractor = deepcopy(simclr_model.convnet)
-    feature_extractor.fc = nn.Identity()
     feature_extractor.eval().to(device)
     logreg_model = logreg_model.to(device)
 
     with torch.no_grad():
-        input_features =feature_extractor(input_tensor)
+        input_features = feature_extractor(input_tensor)
         preds = logreg_model.model(input_features)
         pred_class_idx = preds.argmax(dim=-1).item()
         pred_class_name = class_names[pred_class_idx]
@@ -503,7 +233,7 @@ def fast_visualize_prediction(image_path, simclr_model, logreg_model, precompute
         true_class_name = "Unknown"
 
     input_features_cpu = input_features.cpu()
-    all_similarities = F.cosine_similarity(input_features_cpu, precompute_features)
+    all_similarities = F.cosine_similarity(input_features_cpu, precomputed_features)
 
     similarity_data = []
     for i, (sim, path, cls) in enumerate(zip(all_similarities, precomputed_paths, precomputed_classes)):
@@ -519,25 +249,78 @@ def fast_visualize_prediction(image_path, simclr_model, logreg_model, precompute
     print(f"Ground Truth: {true_class_name}\nPredicted Class: {pred_class_name}\n")
 
     print("Top 10 matches from the predicted class:\n")
-    for i, (sim, path, cls) in enumerate(all_top_matches, 1):
-        print(f"{i}. File: {os.path.basename(path)}, Class: {cls}, Similarity: {sim:.3f}")
+    # for i, (sim, path, cls) in enumerate(all_top_matches, 1):
+    #     print(f"{i}. File: {os.path.basename(path)}, Class: {cls}, Similarity: {sim:.3f}")
+    print(all_top_matches)
 
     if top_10_matches:
+        print(f"\nPredicted class '{pred_class_name}' Top10:")
+        # for i, (sim, path, cls) in enumerate(top_10_matches, 1):
+        #     print(f"{i}. File: {os.path.basename(path)}, Similarity: {sim:.3f}")
+        print(top_10_matches)
         best_sim, best_match_path, best_match_class = all_top_matches[0]
 
-        best_match_img = PIL.Image.open(best_match_path).convert('RGB')
-        best_match_tensor = eval_transform(best_match_img)
+        # best_match_img = PIL.Image.open(best_match_path).convert('RGB')
+        # best_match_tensor = eval_transform(best_match_img)
     else:
         print(f"No matches found for class {pred_class_name}.")
 
+    return all_top_matches, top_10_matches
+
+# simclr_model = torch.load('./app/simclr_model_256x256.pt', weights_only=False)
+# simclr_model.eval()
 
 
-precomputed_data = precompute_features(simclr_model, DATASET_PATH, class_names)
+# Deprecated: Use fast_visualize_prediction with pre-computed data instead
+# This function recomputes features every time, which is inefficient
+def simclr_img_analysis_deprecated(image_path, simclr_model, logreg_model):
+    """
+    DEPRECATED: This function recomputes features every time it's called.
+    Use fast_visualize_prediction with pre-computed data instead for better performance.
+    """
+    print("WARNING: Using deprecated function that recomputes features. Use fast_visualize_prediction instead.")
+    precomputed_data = precompute_features(simclr_model, DATASET_PATH, class_names)
+    all_class_matches, top_10_matches = fast_visualize_prediction(
+        image_path=image_path,
+        simclr_model=simclr_model,
+        logreg_model=logreg_model,
+        precomputed_data=precomputed_data,
+        class_names=class_names
+    )
+    return all_class_matches, top_10_matches
 
-fast_visualize_prediction(
-    image_path="/Users/taxihuang/Downloads/IMG_4898.JPG",
-    simclr_model=simclr_model,
-    logreg_model=logreg_model,
-    precomputed_data=precomputed_data,
-    class_names=class_names
-)
+def simclr_img_analysis(image_path, simclr_model, logreg_model, precomputed_data=None, class_names=None):
+    """
+    Efficient image analysis using pre-computed features.
+    
+    Args:
+        image_path: Path to the image to analyze
+        simclr_model: Pre-loaded SimCLR model
+        logreg_model: Pre-loaded LogisticRegression model
+        precomputed_data: Pre-computed features (features, paths, classes)
+        class_names: List of class names
+    
+    Returns:
+        Tuple of (all_class_matches, top_10_matches)
+    """
+    if precomputed_data is None:
+        print("WARNING: No pre-computed data provided. Computing features on-the-fly (slower).")
+        precomputed_data = precompute_features(simclr_model, DATASET_PATH, class_names or [])
+    
+    if class_names is None:
+        # Try to get class names from precomputed data or use default
+        try:
+            from torchvision.datasets import ImageFolder
+            dataset = ImageFolder(root=DATASET_PATH)
+            class_names = dataset.classes
+        except:
+            class_names = ['Architecture', 'Food', 'Landscape', 'Outfit', 'Sports']  # Default fallback
+    
+    all_class_matches, top_10_matches = fast_visualize_prediction(
+        image_path=image_path,
+        simclr_model=simclr_model,
+        logreg_model=logreg_model,
+        precomputed_data=precomputed_data,
+        class_names=class_names
+    )
+    return all_class_matches, top_10_matches
