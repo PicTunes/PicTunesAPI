@@ -8,3 +8,6 @@ torchvision
 pytorch-lightning
 ipywidgets
 python-multipart
+pillow
+matplotlib
+seaborn
