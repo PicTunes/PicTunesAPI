@@ -1,2 +1,10 @@
 fastapi
-"uvicorn[standard]"
+uvicorn[standard]
+numpy
+IPython
+scikit-learn
+torch
+torchvision
+pytorch-lightning
+ipywidgets
+python-multipart
