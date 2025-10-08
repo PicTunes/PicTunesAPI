@@ -6,7 +6,7 @@ import asyncio
 import os
 import warnings
 
-from app.MediaMerger import MediaMergerClass, media_merger
+from app.MediaMerger import media_merger
 from app.Calculator import calc
 import app.SimCLRAnalyse as simclr_module
 
@@ -32,12 +32,6 @@ app = FastAPI()
 def root():
     return {"message": "Welcome to the PicTunes API!"}
 
-@app.get("/calc")
-def calculate(a: float, b: float, operation: str):
-    result = calc(a, b, operation)
-    if result is not None:
-        return {"result": result}
-    return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"message": "Invalid operation"})
 # to test type curl -X 'GET' 'http://localhost:8001/calc?a=5&b=3&operation=add'
 @app.get("/health/")
 def health_check():
@@ -157,8 +151,8 @@ async def analyze_existing_image(image_filename: str):
             content={"message": f"Analysis failed: {str(e)}", "traceback": traceback.format_exc()}
         )
 
-@app.post("/media_merger/")
-async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
+@app.get("/media_merger/")
+async def merger(img: str, aud: str):
     media_merger(img, aud)
     return {"message": "Media merged successfully"} # Response body
 
