@@ -304,22 +304,83 @@ def fast_visualize_prediction(
             class_name: float(prob.item()) 
             for class_name, prob in zip(class_names, pred_probabilities)
         },
-        'overall_top_10': all_top_matches,
-        'predicted_class_top_10': top_10_matches
+        'overall_top_10': all_top_matches
     }
     
     print(f"[SimCLR] Predicted class: {pred_class_name} (confidence: {all_class_matches['confidence']:.3f})")
     print(f"[SimCLR] Found {len(top_10_matches)} matches in predicted class")
     print(f"[SimCLR] Top overall similarity: {all_top_matches[0]['similarity']:.3f}")
     
-    return all_class_matches, top_10_matches
+    return all_class_matches, all_top_matches, top_10_matches
 
+def match_threshold(all_top_matches):
+    result_matches = []
+    # count classes counts in top10, 
+    class_counts = {"Architecture": 0, "Food": 0, "Landscape": 0, "Outfit": 0, "Sports": 0}
+    for match in all_top_matches:
+        class_counts[match['class']] += 1
+    
+    most_class = max(class_counts.keys(), key=lambda x: class_counts[x])
+    most_class_counts = class_counts[most_class]
+    # if the most class counts is greater than 7, 
+    # return top 5 matches only in this class by similarity order 
+    if most_class_counts > 6:
+        for match in all_top_matches['overall_top_10']:
+            if match['class'] == most_class:
+                result_matches.append(match)
+            
+            if len(result_matches) == 5:
+                return result_matches
+
+    # if not, then process second layer of threshold
+    else:
+        # find the next most class counts, if found then return the most class matches 3 pieces and the next most class matches 2 pieces in by similarity order.
+        next_most_class = max(class_counts.keys(), key=lambda x: class_counts[x] if x != most_class else 0)
+        next_most_class_counts = class_counts[next_most_class]
+
+        # if met with next most class counts has multiple classes, 
+        for class_count in class_counts:
+            if class_count == next_most_class_counts and class_count["class"] != next_most_class["class"]:
+                similarity_next = 0.0
+                similarity_next_num = 0.0
+                similarity_new = 0.0
+                similarity_new_num = 0.0
+                # then find the next class by similarity order
+                for match in all_top_matches:
+                    if match['class'] == class_count:
+                        similarity_next += match['similarity']
+                        similarity_next_num += 1
+                    if match['class'] == next_most_class:
+                        similarity_new += match['similarity']
+                        similarity_new_num += 1
+
+                similarity_next = similarity_next / similarity_next_num
+                similarity_new = similarity_new / similarity_new_num
+
+                if similarity_new > similarity_next:
+                    next_most_class = class_count
+                    next_most_class_counts = class_counts[next_most_class]
+                    break
+
+        for match in all_top_matches:
+            if match['class'] == most_class:
+                result_matches.append(match)
+            if len(result_matches) == 3:
+                break
+        
+        for match in all_top_matches:
+            if match['class'] == next_most_class:
+                result_matches.append(match)
+            if len(result_matches) == 5:
+                break
+        
+        return result_matches
 
 # Load models and precompute features at module initialization
 print("[SimCLR] Loading models...")
 
 # Workaround for loading models saved with __main__ context
-# We need to register our classes in the __main__ namespace
+# Need to register our classes in the __main__ namespace
 import sys
 import __main__
 __main__.SimCLR = SimCLR
