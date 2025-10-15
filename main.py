@@ -2,12 +2,13 @@ from fastapi import FastAPI, Response, status, File, UploadFile
 from fastapi.routing import APIRouter
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel
+import yaml
+import mysql.connector as cnn
 import asyncio
 import os
 import warnings
 
 from app.MediaMerger import media_merger
-# from app.Calculator import calc
 import app.SimCLRAnalyse as simclr_module
 
 # Import PyTorch for device info
@@ -26,6 +27,16 @@ simclr_model = simclr_module.simclr_model
 logreg_model = simclr_module.logreg_model
 precomputed_data = simclr_module.precomputed_data
 
+with open("secret.yaml", "r") as f:
+    db_config = yaml.safe_load(f)
+
+db_connection = cnn.connect(
+    host="localhost",
+    user="root",
+    password=db_config["db_connection"]["password"],
+    database=db_config["db_connection"]["database"]
+)
+
 app = FastAPI()
 
 @app.get("/")
@@ -39,8 +50,15 @@ def health_check():
 
 @app.get("/dbcon_check/")
 def db_connection_check():
-
-    return {"message": "db connection successful"}
+    cursor = db_connection.cursor()
+    cursor.execute("SELECT 1")
+    result = cursor.fetchone()
+    cursor.close()
+    print(result)
+    if result:
+        return {"message": "db connection successful"}
+    else:
+        return {"message": "db connection failed"}
 
 
 @app.post("/upload")
@@ -73,7 +91,7 @@ async def img_analysis(image: UploadFile = File(...)):
             buffer.write(content)
         
         # Perform analysis using pre-computed features
-        all_class_matches, top_10_matches = simclr_module.fast_visualize_prediction(
+        all_class_matches, all_top_matches, top_10_matches = simclr_module.fast_visualize_prediction(
             image_path=temp_file_path,
             simclr_model=simclr_model,
             logreg_model=logreg_model,
@@ -81,6 +99,9 @@ async def img_analysis(image: UploadFile = File(...)):
             class_names=simclr_module.class_names
         )
         
+        # threshold for classes
+        matches = simclr_module.match_threshold(all_top_matches)
+
         # Clean up: delete the uploaded file after analysis
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
@@ -88,7 +109,9 @@ async def img_analysis(image: UploadFile = File(...)):
         
         return {
             "status": "success",
+            "matches": matches,
             "all_class_matches": all_class_matches,
+            "all_top_matches": all_top_matches,
             "top_10_matches": top_10_matches
         }
     except Exception as e:
@@ -103,56 +126,39 @@ async def img_analysis(image: UploadFile = File(...)):
             content={"message": f"Analysis failed: {str(e)}", "traceback": traceback.format_exc()}
         )
 
-# Alternative GET endpoint for testing with existing files
-@app.get("/analyze")
-async def analyze_existing_image(image_filename: str):
-    """
-    Analyze an existing image file (for testing purposes)
-    Expects image to be in the uploads/ directory
-    """
-    if simclr_model is None or logreg_model is None:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, 
-            content={"message": "Models not loaded properly"}
-        )
-    
-    if precomputed_data is None:
-        return JSONResponse(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"message": "Features not pre-computed properly"}
-        )
-    
+@app.post("/media_merger/")
+async def merger(img:UploadFile = File(...), aud: UploadFile = File(...)):
+    temp_file_path = None
     try:
-        image_path = f"uploads/{image_filename}"
-        if not os.path.exists(image_path):
-            return JSONResponse(
-                status_code=status.HTTP_404_NOT_FOUND,
-                content={"message": f"Image not found: {image_filename}"}
-            )
+        # Save uploaded file temporarily
+        upload_dir = "uploads"
+        os.makedirs(upload_dir, exist_ok=True)
+        temp_file_path = os.path.join(upload_dir, img.filename)
+        temp_aud_file_path = os.path.join(upload_dir, aud.filename)
         
-        # Use the pre-computed features instead of computing them on each request
-        all_class_matches, top_10_matches = simclr_module.fast_visualize_prediction(
-            image_path=image_path,
-            simclr_model=simclr_model,
-            logreg_model=logreg_model,
-            precomputed_data=precomputed_data,
-            class_names=simclr_module.class_names
-        )
-        
-        return {
-            "status": "success",
-            "all_class_matches": all_class_matches,
-            "top_10_matches": top_10_matches
-        }
+        with open(temp_file_path, "wb") as buffer:
+            content = await img.read()
+            buffer.write(content)
+        with open(temp_aud_file_path, "wb") as buffer:
+            content = await aud.read()
+            buffer.write(content)
+
+        media_merger(temp_file_path, temp_aud_file_path)
+
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+            print(f"[Upload] Cleaned up temporary file: {img.filename}")
+        if temp_aud_file_path and os.path.exists(temp_aud_file_path):
+            os.remove(temp_aud_file_path)
+            print(f"[Upload] Cleaned up temporary file: {aud.filename}")
+
     except Exception as e:
         import traceback
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            content={"message": f"Analysis failed: {str(e)}", "traceback": traceback.format_exc()}
+            content={"message": f"Media merging failed: {str(e)}", "traceback": traceback.format_exc()}
         )
-
-@app.get("/media_merger/")
-async def merger(img: str, aud: str):
-    media_merger(img, aud)
+    
     return {"message": "Media merged successfully"} # Response body
+
 
