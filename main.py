@@ -7,7 +7,7 @@ import os
 import warnings
 
 from app.MediaMerger import media_merger
-from app.Calculator import calc
+# from app.Calculator import calc
 import app.SimCLRAnalyse as simclr_module
 
 # Import PyTorch for device info
