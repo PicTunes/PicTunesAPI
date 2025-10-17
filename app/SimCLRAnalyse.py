@@ -303,8 +303,7 @@ def fast_visualize_prediction(
         'all_class_probabilities': {
             class_name: float(prob.item()) 
             for class_name, prob in zip(class_names, pred_probabilities)
-        },
-        'overall_top_10': all_top_matches
+        }
     }
     
     print(f"[SimCLR] Predicted class: {pred_class_name} (confidence: {all_class_matches['confidence']:.3f})")
@@ -325,7 +324,7 @@ def match_threshold(all_top_matches):
     # if the most class counts is greater than 7, 
     # return top 5 matches only in this class by similarity order 
     if most_class_counts > 6:
-        for match in all_top_matches['overall_top_10']:
+        for match in all_top_matches:
             if match['class'] == most_class:
                 result_matches.append(match)
             
