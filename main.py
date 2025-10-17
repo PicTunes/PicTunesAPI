@@ -31,8 +31,8 @@ with open("secret.yaml", "r") as f:
     db_config = yaml.safe_load(f)
 
 db_connection = cnn.connect(
-    host="localhost",
-    user="root",
+    host=db_config["db_connection"]["host"],
+    user=db_config["db_connection"]["user"],
     password=db_config["db_connection"]["password"],
     database=db_config["db_connection"]["database"]
 )
