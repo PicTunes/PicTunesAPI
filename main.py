@@ -62,6 +62,7 @@ def get_music_matches(matches):
         })
     return music_matches
 
+
 app = FastAPI()
 
 @app.get("/")
