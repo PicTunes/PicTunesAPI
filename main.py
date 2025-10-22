@@ -6,6 +6,7 @@ import yaml
 import mysql.connector as cnn
 import asyncio
 import os
+import re
 import warnings
 
 from app.MediaMerger import media_merger
@@ -30,12 +31,37 @@ precomputed_data = simclr_module.precomputed_data
 with open("secret.yaml", "r") as f:
     db_config = yaml.safe_load(f)
 
-db_connection = cnn.connect(
-    host=db_config["db_connection"]["host"],
-    user=db_config["db_connection"]["user"],
-    password=db_config["db_connection"]["password"],
-    database=db_config["db_connection"]["database"]
-)
+def get_db_connection():
+    db_connection = cnn.connect(
+        host=db_config["db_connection"]["host"],
+        user=db_config["db_connection"]["user"],
+        passwd=db_config["db_connection"]["password"],
+        database=db_config["db_connection"]["database"]
+    )
+    cursor = db_connection.cursor()
+    return db_connection, cursor
+
+def get_music_matches(matches):
+    music_matches = []
+    for match in matches:
+        # detect for numeric id in the filename eg. ./dataset/Sports/30051.jpg -> 30051
+        numeric_id = re.search(r'\d+', match['filename']).group(0)
+        # then find the music_id in the music_table by the numeric id by mysql query
+        db_connection, cursor = get_db_connection()
+        cursor.execute("SELECT * FROM music_table WHERE music_id = (SELECT music_id FROM link_table WHERE image_id = %s);", (numeric_id,))
+        result = cursor.fetchall()
+        music_matches.append({
+            "music_id": result[0][0],
+            "music_name": result[0][1],
+            "anime_title": result[0][2],
+            "piece": result[0][3],
+            "duration": result[0][4],
+            "youtube_link": result[0][5],
+            "composer": result[0][6],
+            "kind": result[0][7]
+        })
+    return music_matches
+
 
 app = FastAPI()
 
@@ -50,22 +76,22 @@ def health_check():
 
 @app.get("/dbcon_check/")
 def db_connection_check():
-    cursor = db_connection.cursor()
-    cursor.execute("SELECT 1")
-    result = cursor.fetchone()
-    cursor.close()
-    print(result)
-    if result:
+    db_connection, cursor = get_db_connection()
+    try:
+        cursor.execute("SELECT 1")
+        result = cursor.fetchone()
+        cursor.close()
+        db_connection.close()
         return {"message": "db connection successful"}
-    else:
-        return {"message": "db connection failed"}
+    except Exception as e:
+        return {"message": f"db connection failed: {str(e)}"}
 
 
 @app.post("/upload")
 async def img_analysis(image: UploadFile = File(...)):
     """
     Upload an image for classification and similarity search
-    Returns predicted class and top 10 most similar images
+    Returns predicted class and top 10 most similar images with URLs to access them
     """
     if simclr_model is None or logreg_model is None:
         return JSONResponse(
@@ -91,7 +117,8 @@ async def img_analysis(image: UploadFile = File(...)):
             buffer.write(content)
         
         # Perform analysis using pre-computed features
-        all_class_matches, all_top_matches, top_10_matches = simclr_module.fast_visualize_prediction(
+        # all_class_matches, all_top_matches, top_10_matches = simclr_module.fast_visualize_prediction(
+        _, all_top_matches, _ = simclr_module.fast_visualize_prediction(
             image_path=temp_file_path,
             simclr_model=simclr_model,
             logreg_model=logreg_model,
@@ -106,14 +133,20 @@ async def img_analysis(image: UploadFile = File(...)):
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
             print(f"[Upload] Cleaned up temporary file: {image.filename}")
-        
-        return {
-            "status": "success",
-            "matches": matches,
-            "all_class_matches": all_class_matches,
-            "all_top_matches": all_top_matches,
-            "top_10_matches": top_10_matches
-        }
+
+        music_matches = get_music_matches(matches)
+
+        for match, music_match in zip(matches, music_matches):
+            match["music_match"] = music_match
+            # Add image URL for client to fetch
+            match["image_url"] = f"/image/{match['class']}/{match['filename']}.jpg"
+
+        return JSONResponse(
+            content={
+                "status": "success",
+                "matches": matches,
+            }
+        )
     except Exception as e:
         import traceback
         # Clean up the file even if analysis fails
@@ -126,8 +159,27 @@ async def img_analysis(image: UploadFile = File(...)):
             content={"message": f"Analysis failed: {str(e)}", "traceback": traceback.format_exc()}
         )
 
+@app.get("/image/{class_name}/{filename}")
+async def get_image(class_name: str, filename: str):
+    """
+    Serve an image from the dataset
+    """
+    image_path = f"./dataset/{class_name}/{filename}"
+    
+    if not os.path.exists(image_path):
+        return JSONResponse(
+            status_code=status.HTTP_404_NOT_FOUND,
+            content={"message": "Image not found"}
+        )
+    
+    return FileResponse(
+        path=image_path,
+        media_type="image/jpeg",
+        filename=filename
+    )
+
 @app.post("/media_merger/")
-async def merger(img:UploadFile = File(...), aud: UploadFile = File(...)):
+async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
     temp_file_path = None
     try:
         # Save uploaded file temporarily
