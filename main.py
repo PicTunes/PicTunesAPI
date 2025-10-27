@@ -183,10 +183,11 @@ async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
     temp_file_path = None
     try:
         # Save uploaded file temporarily
-        upload_dir = "uploads"
+        upload_dir = "processing"
         os.makedirs(upload_dir, exist_ok=True)
         temp_file_path = os.path.join(upload_dir, img.filename)
         temp_aud_file_path = os.path.join(upload_dir, aud.filename)
+        output_file_path = os.path.join(upload_dir, f"{img.filename}_{aud.filename}.mp4")
         
         with open(temp_file_path, "wb") as buffer:
             content = await img.read()
@@ -195,22 +196,21 @@ async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
             content = await aud.read()
             buffer.write(content)
 
-        media_merger(temp_file_path, temp_aud_file_path)
+        media_merger(temp_file_path, temp_aud_file_path, output_file_path)
 
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
-            print(f"[Upload] Cleaned up temporary file: {img.filename}")
+            print(f"[./processing] Cleaned up temporary file: {img.filename}")
         if temp_aud_file_path and os.path.exists(temp_aud_file_path):
             os.remove(temp_aud_file_path)
-            print(f"[Upload] Cleaned up temporary file: {aud.filename}")
+            print(f"[./processing] Cleaned up temporary file: {aud.filename}")
 
+        return FileResponse(path='./processing/output.mp4', media_type="video/mp4")
     except Exception as e:
         import traceback
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"message": f"Media merging failed: {str(e)}", "traceback": traceback.format_exc()}
         )
-    
-    return {"message": "Media merged successfully"} # Response body
 
 

@@ -1,7 +1,7 @@
 import ffmpeg
 import os
 
-def media_merger(img, aud):
+def media_merger(img, aud, out):
     # read image file
     img_content = ffmpeg.input(f"{img}",loop=1)
     aud_content = ffmpeg.input(f"{aud}")
@@ -10,7 +10,7 @@ def media_merger(img, aud):
     try:
         img_content.output(
             aud_content,
-            "uploads/output.mp4",
+            "processing/output.mp4",
             vcodec='libx264',
             shortest=None,
             **{'c:a': 'aac'}
