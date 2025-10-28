@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Response, status, File, UploadFile
 from fastapi.routing import APIRouter
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
+from ffmpeg import output
 from pydantic import BaseModel
 import yaml
 import mysql.connector as cnn
@@ -183,11 +184,11 @@ async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
     temp_file_path = None
     try:
         # Save uploaded file temporarily
-        upload_dir = "processing"
+        upload_dir = "./processing"
         os.makedirs(upload_dir, exist_ok=True)
         temp_file_path = os.path.join(upload_dir, img.filename)
         temp_aud_file_path = os.path.join(upload_dir, aud.filename)
-        output_file_path = os.path.join(upload_dir, f"{img.filename}_{aud.filename}.mp4")
+        output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-4]}_{aud.filename[:-4]}.mp4")
         
         with open(temp_file_path, "wb") as buffer:
             content = await img.read()
@@ -205,12 +206,24 @@ async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
             os.remove(temp_aud_file_path)
             print(f"[./processing] Cleaned up temporary file: {aud.filename}")
 
-        return FileResponse(path='./processing/output.mp4', media_type="video/mp4")
+        return FileResponse(path=f'{output_file_path}', media_type="video/mp4", filename=f'output_{img.filename[:-4]}_{aud.filename[:-4]}.mp4')
+
     except Exception as e:
         import traceback
         return JSONResponse(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             content={"message": f"Media merging failed: {str(e)}", "traceback": traceback.format_exc()}
         )
+
+@app.get("/media_merger/cleanup/")
+async def cleanup(filename: str):
+    upload_dir = "./processing"
+    os.makedirs(upload_dir, exist_ok=True)
+    temp_file_path = os.path.join(upload_dir, filename)
+    if os.path.exists(temp_file_path):
+        os.remove(temp_file_path)
+
+    return {"message": "File cleaned up successfully"}
+
 
 

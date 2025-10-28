@@ -8,9 +8,10 @@ def media_merger(img, aud, out):
     print(img_content)
     print(aud_content)
     try:
+        print(f"processing/{out}")
         img_content.output(
             aud_content,
-            "processing/output.mp4",
+            f"{out}",
             vcodec='libx264',
             shortest=None,
             **{'c:a': 'aac'}
@@ -19,12 +20,4 @@ def media_merger(img, aud, out):
         print(f"ffmpeg error: {e.stderr.decode()}")
     except Exception as e:
         print(f"error: {e}")
-    # .run(overwrite_output=True)
-
-
-# media_merger(
-#     img="/Users/taxihuang/Desktop/DEsktop/general/gradProj/PicTunesAPI/uploads/IMG_4709.JPG",
-#     aud="/Users/taxihuang/Desktop/DEsktop/DTM/samples/how to make uk hardcore/KSHMR Exhaust 05.wav"
-# )
-
-# '/Users/taxihuang/Desktop/DEsktop/DTM/samples/how to make uk hardcore/KSHMR Exhaust 05.wav'
+    
