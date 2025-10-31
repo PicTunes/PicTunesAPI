@@ -16,6 +16,7 @@ from torchvision import transforms
 import torchvision
 import pytorch_lightning as pl
 import PIL
+from pillow_heif import register_heif_opener
 import numpy as np
 
 warnings.filterwarnings('ignore')
@@ -30,6 +31,8 @@ NUM_WORKERS = os.cpu_count() if os.cpu_count() else 2
 
 print(f"[SimCLR] Device: {device}")
 print(f"[SimCLR] NUM_WORKERS: {NUM_WORKERS}")
+
+register_heif_opener()
 
 
 class SimCLR(pl.LightningModule):

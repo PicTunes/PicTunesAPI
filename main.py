@@ -188,7 +188,10 @@ async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
         os.makedirs(upload_dir, exist_ok=True)
         temp_file_path = os.path.join(upload_dir, img.filename)
         temp_aud_file_path = os.path.join(upload_dir, aud.filename)
-        output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-4]}_{aud.filename[:-4]}.mp4")
+        if temp_file_path.endswith('.heic'):
+            output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-6]}_{aud.filename[:-5]}.mp4")
+        else:
+            output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-5]}_{aud.filename[:-5]}.mp4")
         
         with open(temp_file_path, "wb") as buffer:
             content = await img.read()
