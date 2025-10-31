@@ -12,6 +12,7 @@ pytorch-lightning
 ipywidgets
 python-multipart
 pillow
+pillow-heif
 matplotlib
 seaborn
 ffmpeg-python
