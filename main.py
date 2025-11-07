@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Response, status, File, UploadFile
+from fastapi import FastAPI, Request, Response, status, File, Form,UploadFile
 from fastapi.routing import APIRouter
 from fastapi.responses import JSONResponse, FileResponse, StreamingResponse
 from ffmpeg import output
@@ -180,24 +180,30 @@ async def get_image(class_name: str, filename: str):
     )
 
 @app.post("/media_merger/")
-async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
+async def merger(img: UploadFile = File(...), aud: str = Form(...)):
     temp_file_path = None
     try:
         # Save uploaded file temporarily
         upload_dir = "./processing"
+        music_dir = "./Music_Data"
+        genre = "Anime"
         os.makedirs(upload_dir, exist_ok=True)
         temp_file_path = os.path.join(upload_dir, img.filename)
-        temp_aud_file_path = os.path.join(upload_dir, aud.filename)
+        temp_aud_file_path = music_dir + "/" + genre + "/" + aud + ".mp3"
+
+        if not os.path.exists(temp_aud_file_path):
+            return JSONResponse(
+                status_code=status.HTTP_404_NOT_FOUND,
+                content={"message": "Music file not found"}
+            )
+        
         if temp_file_path.endswith('.heic'):
-            output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-6]}_{aud.filename[:-5]}.mp4")
+            output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-6]}_{aud}.mp4")
         else:
-            output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-5]}_{aud.filename[:-5]}.mp4")
+            output_file_path = os.path.join(upload_dir, f"output_{img.filename[:-5]}_{aud}.mp4")
         
         with open(temp_file_path, "wb") as buffer:
             content = await img.read()
-            buffer.write(content)
-        with open(temp_aud_file_path, "wb") as buffer:
-            content = await aud.read()
             buffer.write(content)
 
         media_merger(temp_file_path, temp_aud_file_path, output_file_path)
@@ -205,11 +211,9 @@ async def merger(img: UploadFile = File(...), aud: UploadFile = File(...)):
         if temp_file_path and os.path.exists(temp_file_path):
             os.remove(temp_file_path)
             print(f"[./processing] Cleaned up temporary file: {img.filename}")
-        if temp_aud_file_path and os.path.exists(temp_aud_file_path):
-            os.remove(temp_aud_file_path)
-            print(f"[./processing] Cleaned up temporary file: {aud.filename}")
+        
 
-        return FileResponse(path=f'{output_file_path}', media_type="video/mp4", filename=f'output_{img.filename[:-4]}_{aud.filename[:-4]}.mp4')
+        return FileResponse(path=f'{output_file_path}', media_type="video/mp4", filename=f'output_{img.filename[:-4]}_{aud}.mp4')
 
     except Exception as e:
         import traceback
