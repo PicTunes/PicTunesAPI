@@ -154,7 +154,7 @@ def precompute_features(simclr_model, dataset_path, class_names):
     
     # Prepare feature extractor
     feature_extractor = deepcopy(simclr_model.convnet)
-    feature_extractor.fc = nn.Identity()
+    # feature_extractor.fc = nn.Identity()
     feature_extractor.eval().to(device)
     
     # Image transformation for evaluation
@@ -257,7 +257,7 @@ def fast_visualize_prediction(
     
     # Prepare models
     feature_extractor = deepcopy(simclr_model.convnet)
-    feature_extractor.fc = nn.Identity()
+    # feature_extractor.fc = nn.Identity()
     feature_extractor.eval().to(device)
     logreg_model = logreg_model.to(device)
     
