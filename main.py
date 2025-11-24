@@ -33,28 +33,47 @@ with open("secret.yaml", "r") as f:
     db_config = yaml.safe_load(f)
 
 def get_db_connection():
-    db_connection = cnn.connect(
+    anime_db_connection = cnn.connect(
         host=db_config["db_connection"]["host"],
         user=db_config["db_connection"]["user"],
         passwd=db_config["db_connection"]["password"],
-        database=db_config["db_connection"]["database"]
+        database=db_config["db_connection"]["anime_database"]
     )
-    cursor = db_connection.cursor()
-    return db_connection, cursor
+    anime_cursor = anime_db_connection.cursor()
 
-def get_music_matches(matches):
+    movie_db_connection = cnn.connect(
+        host=db_config["db_connection"]["host"],
+        user=db_config["db_connection"]["user"],
+        passwd=db_config["db_connection"]["password"],
+        database=db_config["db_connection"]["movie_database"]
+    )
+    movie_cursor = anime_db_connection.cursor()
+    return anime_db_connection, movie_db_connection, anime_cursor, movie_cursor
+
+def get_music_matches(matches, genre: str):
     music_matches = []
     for match in matches:
+        result = None
         # detect for numeric id in the filename eg. ./dataset/Sports/30051.jpg -> 30051
         numeric_id = re.search(r'\d+', match['filename']).group(0)
         # then find the music_id in the music_table by the numeric id by mysql query
-        db_connection, cursor = get_db_connection()
-        cursor.execute("SELECT * FROM music_table WHERE music_id = (SELECT music_id FROM link_table WHERE image_id = %s);", (numeric_id,))
-        result = cursor.fetchall()
+        anime_db_connection, movie_db_connection, anime_cursor, movie_cursor = get_db_connection()
+        if genre == "Anime":
+            anime_cursor.execute("SELECT * FROM pictunes_test_DB.music_table WHERE music_id = (SELECT music_id FROM pictunes_test_DB.link_table WHERE image_id = %s);", (numeric_id,))
+            result = anime_cursor.fetchall()
+        elif genre == "Movie":
+            movie_cursor.execute("SELECT * FROM pictunes_movie_DB.music_table WHERE music_id = (SELECT music_id FROM pictunes_movie_DB.link_table WHERE image_id = %s);", (numeric_id,))
+            result = movie_cursor.fetchall()
+        else:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"message": "Invalid genre"}
+            )
+        
         music_matches.append({
             "music_id": result[0][0],
             "music_name": result[0][1],
-            "anime_title": result[0][2],
+            "artwork_title": result[0][2],
             "piece": result[0][3],
             "duration": result[0][4],
             "youtube_link": result[0][5],
@@ -70,26 +89,29 @@ app = FastAPI()
 def root():
     return {"message": "Welcome to the PicTunes API!"}
 
-# to test type curl -X 'GET' 'http://localhost:8001/calc?a=5&b=3&operation=add'
 @app.get("/health/")
 def health_check():
     return Response(status_code=status.HTTP_200_OK)
 
 @app.get("/dbcon_check/")
 def db_connection_check():
-    db_connection, cursor = get_db_connection()
+    anime_db_connection, movie_db_connection, anime_cursor, movie_cursor = get_db_connection()
     try:
-        cursor.execute("SELECT 1")
-        result = cursor.fetchone()
-        cursor.close()
-        db_connection.close()
-        return {"message": "db connection successful"}
+        anime_cursor.execute("SELECT 1")
+        anime_result = anime_cursor.fetchone()
+        anime_cursor.close()
+        movie_cursor.execute("SELECT 1")
+        movie_result = movie_cursor.fetchone()
+        movie_cursor.close()
+        anime_db_connection.close()
+        movie_db_connection.close()
+        return {"message": "db connection successful", "anime_db_connection": anime_result, "movie_db_connection": movie_result}
     except Exception as e:
-        return {"message": f"db connection failed: {str(e)}"}
+        return {"message": f"db connection failed: {str(e)}", "anime_db_connection": anime_result, "movie_db_connection": movie_result}
 
 
 @app.post("/upload")
-async def img_analysis(image: UploadFile = File(...)):
+async def img_analysis(image: UploadFile = File(...), genre: str = Form(...)):
     """
     Upload an image for classification and similarity search
     Returns predicted class and top 10 most similar images with URLs to access them
@@ -135,7 +157,7 @@ async def img_analysis(image: UploadFile = File(...)):
             os.remove(temp_file_path)
             print(f"[Upload] Cleaned up temporary file: {image.filename}")
 
-        music_matches = get_music_matches(matches)
+        music_matches = get_music_matches(matches, genre)
 
         for match, music_match in zip(matches, music_matches):
             match["music_match"] = music_match
@@ -180,13 +202,18 @@ async def get_image(class_name: str, filename: str):
     )
 
 @app.post("/media_merger/")
-async def merger(img: UploadFile = File(...), aud: str = Form(...)):
+async def merger(img: UploadFile = File(...), aud: str = Form(...), genre: str = Form(...)):
     temp_file_path = None
     try:
+        if genre is None:
+            return JSONResponse(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                content={"message": "Genre is required"}
+            )
+        
         # Save uploaded file temporarily
         upload_dir = "./processing"
         music_dir = "./Music_Data"
-        genre = "Anime"
         os.makedirs(upload_dir, exist_ok=True)
         temp_file_path = os.path.join(upload_dir, img.filename)
         temp_aud_file_path = music_dir + "/" + genre + "/" + aud + ".mp3"
