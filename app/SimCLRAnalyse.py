@@ -154,7 +154,7 @@ def precompute_features(simclr_model, dataset_path, class_names):
     
     # Prepare feature extractor
     feature_extractor = deepcopy(simclr_model.convnet)
-    # feature_extractor.fc = nn.Identity()
+    feature_extractor.fc = nn.Identity()
     feature_extractor.eval().to(device)
     
     # Image transformation for evaluation
@@ -257,7 +257,7 @@ def fast_visualize_prediction(
     
     # Prepare models
     feature_extractor = deepcopy(simclr_model.convnet)
-    # feature_extractor.fc = nn.Identity()
+    feature_extractor.fc = nn.Identity()
     feature_extractor.eval().to(device)
     logreg_model = logreg_model.to(device)
     
@@ -390,7 +390,7 @@ __main__.LogisticRegression = LogisticRegression
 
 try:
     # Load SimCLR model
-    simclr_model_path = os.path.join(MODEL_PATH, "simclr_model_256x256.pt")
+    simclr_model_path = os.path.join(MODEL_PATH, "simclr_model_96x96_500ep_resnet50.pt")
     simclr_model = torch.load(simclr_model_path, map_location=device, weights_only=False)
     simclr_model.eval()
     print("[SimCLR] SimCLR model loaded successfully")
@@ -400,7 +400,7 @@ except Exception as e:
 
 try:
     # Load Logistic Regression model
-    logreg_model_path = os.path.join(MODEL_PATH, "logreg_model.pt")
+    logreg_model_path = os.path.join(MODEL_PATH, "logreg_model_96_500_50.pt")
     logreg_model = torch.load(logreg_model_path, map_location=device, weights_only=False)
     logreg_model.eval()
     print("[SimCLR] Logistic Regression model loaded successfully")
