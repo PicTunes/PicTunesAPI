@@ -59,7 +59,7 @@ def get_music_matches(matches, genre: str):
         # then find the music_id in the music_table by the numeric id by mysql query
         anime_db_connection, movie_db_connection, anime_cursor, movie_cursor = get_db_connection()
         if genre == "Anime":
-            anime_cursor.execute("SELECT * FROM pictunes_test_DB.music_table WHERE music_id = (SELECT music_id FROM pictunes_test_DB.link_table WHERE image_id = %s);", (numeric_id,))
+            anime_cursor.execute("SELECT * FROM PicTunesDB.music_table WHERE music_id = (SELECT music_id FROM PicTunesDB.link_table WHERE image_id = %s);", (numeric_id,))
             result = anime_cursor.fetchall()
         elif genre == "Movie":
             movie_cursor.execute("SELECT * FROM pictunes_movie_DB.music_table WHERE music_id = (SELECT music_id FROM pictunes_movie_DB.link_table WHERE image_id = %s);", (numeric_id,))
