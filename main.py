@@ -70,16 +70,17 @@ def get_music_matches(matches, genre: str):
                 content={"message": "Invalid genre"}
             )
         
-        music_matches.append({
-            "music_id": result[0][0],
-            "music_name": result[0][1],
-            "artwork_title": result[0][2],
-            "piece": result[0][3],
-            "duration": result[0][4],
-            "youtube_link": result[0][5],
-            "composer": result[0][6],
-            "kind": result[0][7]
-        })
+        if result:
+            music_matches.append({
+                "music_id": result[0][0],
+                "music_name": result[0][1],
+                "artwork_title": result[0][2],
+                "piece": result[0][3],
+                "duration": result[0][4],
+                "youtube_link": result[0][5],
+                "composer": result[0][6],
+                "kind": result[0][7]
+            })
     return music_matches
 
 
