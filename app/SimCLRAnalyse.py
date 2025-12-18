@@ -400,7 +400,7 @@ except Exception as e:
 
 try:
     # Load Logistic Regression model
-    logreg_model_path = os.path.join(MODEL_PATH, "app/logreg_model_200200_500_50_2370.pt")
+    logreg_model_path = os.path.join(MODEL_PATH, "logreg_model_200200_500_50_2370.pt")
     logreg_model = torch.load(logreg_model_path, map_location=device, weights_only=False)
     logreg_model.eval()
     print("[SimCLR] Logistic Regression model loaded successfully")
