@@ -20,10 +20,6 @@ The backend is implemented as a FastAPI service and integrates:
 
 ---
 
-# System Preview
-
-> 此區建議放置 PicTunes App 的實際操作流程，讓瀏覽者可以在閱讀技術細節之前先理解系統成果。
-
 ## Image Upload
 
 <!--
@@ -31,12 +27,6 @@ The backend is implemented as a FastAPI service and integrates:
 -->
 
 使用者可以從裝置選擇圖片並上傳至 PicTunes。
-
-建議展示：
-
-* 圖片選擇畫面
-* Anime / Movie 音樂類型選擇
-* 上傳與分析狀態
 
 ---
 
@@ -49,14 +39,6 @@ The backend is implemented as a FastAPI service and integrates:
 系統分析影像後，回傳與輸入圖片具有相似視覺特徵的參考影像，以及這些影像所對應的音樂。
 
 建議展示：
-
-* 輸入圖片
-* 相似圖片
-* Similarity Score
-* 推薦音樂
-* Composer
-* Artwork / Piece
-* YouTube Link
 
 ---
 
